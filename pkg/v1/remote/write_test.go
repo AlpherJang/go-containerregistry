@@ -21,15 +21,6 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"io"
-	"io/ioutil"
-	"net/http"
-	"net/http/httptest"
-	"net/url"
-	"strings"
-	"sync/atomic"
-	"testing"
-
 	"github.com/google/go-cmp/cmp"
 	"github.com/google/go-cmp/cmp/cmpopts"
 	"github.com/google/go-containerregistry/pkg/name"
@@ -44,6 +35,14 @@ import (
 	"github.com/google/go-containerregistry/pkg/v1/tarball"
 	"github.com/google/go-containerregistry/pkg/v1/types"
 	"github.com/google/go-containerregistry/pkg/v1/validate"
+	"io"
+	"io/ioutil"
+	"net/http"
+	"net/http/httptest"
+	"net/url"
+	"strings"
+	"sync/atomic"
+	"testing"
 )
 
 func mustNewTag(t *testing.T, s string) name.Tag {
@@ -705,11 +704,11 @@ func TestUploadOne(t *testing.T) {
 		Layer:     l,
 		Reference: w.repo.Digest(h.String()),
 	}
-	if err := w.uploadOne(ml); err != nil {
+	if _, err := w.uploadOne(ml); err != nil {
 		t.Errorf("uploadOne() = %v", err)
 	}
 	// Hit the existing blob path.
-	if err := w.uploadOne(l); err != nil {
+	if _, err := w.uploadOne(l); err != nil {
 		t.Errorf("uploadOne() = %v", err)
 	}
 }
@@ -754,7 +753,7 @@ func TestUploadOneStreamedLayer(t *testing.T) {
 	wantDigest := "sha256:3d7c465be28d9e1ed810c42aeb0e747b44441424f566722ba635dc93c947f30e"
 	wantDiffID := "sha256:27dd1f61b867b6a0f6e9d8a41c43231de52107e53ae424de8f847b821db4b711"
 	l := stream.NewLayer(newBlob())
-	if err := w.uploadOne(l); err != nil {
+	if _, err := w.uploadOne(l); err != nil {
 		t.Fatalf("uploadOne: %v", err)
 	}
 
@@ -860,6 +859,66 @@ func TestWrite(t *testing.T) {
 	if err := Write(tag, img); err != nil {
 		t.Errorf("Write() = %v", err)
 	}
+}
+
+func TestWriteWithProgress(t *testing.T) {
+	img := setupImage(t)
+	expectedRepo := "write/time"
+	headPathPrefix := fmt.Sprintf("/v2/%s/blobs/", expectedRepo)
+	initiatePath := fmt.Sprintf("/v2/%s/blobs/uploads/", expectedRepo)
+	manifestPath := fmt.Sprintf("/v2/%s/manifests/latest", expectedRepo)
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodHead && strings.HasPrefix(r.URL.Path, headPathPrefix) && r.URL.Path != initiatePath {
+			http.Error(w, "NotFound", http.StatusNotFound)
+			return
+		}
+		switch r.URL.Path {
+		case "/v2/":
+			w.WriteHeader(http.StatusOK)
+		case initiatePath:
+			if r.Method != http.MethodPost {
+				t.Errorf("Method; got %v, want %v", r.Method, http.MethodPost)
+			}
+			http.Error(w, "Mounted", http.StatusCreated)
+		case manifestPath:
+			if r.Method != http.MethodPut {
+				t.Errorf("Method; got %v, want %v", r.Method, http.MethodPut)
+			}
+			http.Error(w, "Created", http.StatusCreated)
+		default:
+			t.Fatalf("Unexpected path: %v", r.URL.Path)
+		}
+	}))
+	defer server.Close()
+	u, err := url.Parse(server.URL)
+	if err != nil {
+		t.Fatalf("url.Parse(%v) = %v", server.URL, err)
+	}
+	tag, err := name.NewTag(fmt.Sprintf("%s/%s:latest", u.Host, expectedRepo), name.WeakValidation)
+	if err != nil {
+		t.Fatalf("NewTag() = %v", err)
+	}
+
+	updateNotice := make(chan FinishLayer)
+	stopCh := make(chan struct{})
+	go func() {
+		update := FinishLayer{}
+		for {
+			select {
+			case update = <-updateNotice:
+				fmt.Printf("layer digest is: %s , existed is: %v\n", update.Digest, update.Existed)
+			case <-stopCh:
+				return
+			}
+		}
+	}()
+
+	if err := Write(tag, img, WithProgress(updateNotice)); err != nil {
+		t.Errorf("Write() = %v", err)
+	}
+	fmt.Printf("update finished")
+	close(stopCh)
 }
 
 func TestWriteWithErrors(t *testing.T) {

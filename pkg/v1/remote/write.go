@@ -93,7 +93,15 @@ func Write(ref name.Reference, img v1.Image, options ...Option) error {
 		}
 
 		g.Go(func() error {
-			return w.uploadOne(l)
+			existed, err := w.uploadOne(l)
+			// if upload success notify layer digest to progress chan while chan is not nil
+			if err == nil && o != nil && o.updates != nil {
+				o.updates <- FinishLayer{
+					Digest:  h.String(),
+					Existed: existed,
+				}
+			}
+			return err
 		})
 	}
 
@@ -110,13 +118,31 @@ func Write(ref name.Reference, img v1.Image, options ...Option) error {
 		if err != nil {
 			return err
 		}
-		if err := w.uploadOne(l); err != nil {
+		if existed, err := w.uploadOne(l); err != nil {
 			return err
+		} else {
+			// if upload success notify layer digest to progress chan while chan is not nil
+			if o != nil && o.updates != nil {
+				h, _ := l.Digest()
+				o.updates <- FinishLayer{
+					Digest:  h.String(),
+					Existed: existed,
+				}
+			}
 		}
 	} else {
 		// We *can* read the ConfigLayer, so upload it concurrently with the layers.
 		g.Go(func() error {
-			return w.uploadOne(l)
+			existed, err := w.uploadOne(l)
+			// if upload success notify layer digest to progress chan while chan is not nil
+			if err == nil && o != nil && o.updates != nil {
+				h, _ := l.Digest()
+				o.updates <- FinishLayer{
+					Digest:  h.String(),
+					Existed: existed,
+				}
+			}
+			return err
 		})
 
 		// Wait for the layers + config.
@@ -307,18 +333,18 @@ func (w *writer) commitBlob(location, digest string) error {
 }
 
 // uploadOne performs a complete upload of a single layer.
-func (w *writer) uploadOne(l v1.Layer) error {
+func (w *writer) uploadOne(l v1.Layer) (bool, error) {
 	var from, mount string
 	if h, err := l.Digest(); err == nil {
 		// If we know the digest, this isn't a streaming layer. Do an existence
 		// check so we can skip uploading the layer if possible.
 		existing, err := w.checkExistingBlob(h)
 		if err != nil {
-			return err
+			return false, err
 		}
 		if existing {
 			logs.Progress.Printf("existing blob: %v", h)
-			return nil
+			return true, nil
 		}
 
 		mount = h.String()
@@ -372,7 +398,7 @@ func (w *writer) uploadOne(l v1.Layer) error {
 		Steps:    3,
 	}
 
-	return retry.Retry(tryUpload, retry.IsTemporary, backoff)
+	return false, retry.Retry(tryUpload, retry.IsTemporary, backoff)
 }
 
 type withMediaType interface {
@@ -555,7 +581,8 @@ func WriteLayer(repo name.Repository, layer v1.Layer, options ...Option) error {
 		context: o.context,
 	}
 
-	return w.uploadOne(layer)
+	_, err = w.uploadOne(layer)
+	return err
 }
 
 // Tag adds a tag to the given Taggable.
