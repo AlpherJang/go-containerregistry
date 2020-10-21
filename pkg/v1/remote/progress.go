@@ -1,6 +1,7 @@
 package remote
 
-type FinishLayer struct {
+type Update struct {
+	Total   int
 	Digest  string
 	Existed bool
 }

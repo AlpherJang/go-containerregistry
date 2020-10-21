@@ -33,7 +33,7 @@ type options struct {
 	transport http.RoundTripper
 	platform  v1.Platform
 	context   context.Context
-	updates   chan<- FinishLayer
+	updates   chan<- Update
 }
 
 func makeOptions(target authn.Resource, opts ...Option) (*options, error) {
@@ -139,7 +139,7 @@ func WithContext(ctx context.Context) Option {
 // E.g., chan will close after push image
 //
 // The default updates is nil.
-func WithProgress(updates chan<- FinishLayer) Option {
+func WithProgress(updates chan<- Update) Option {
 	return func(o *options) error {
 		o.updates = updates
 		return nil

@@ -67,6 +67,7 @@ func Write(ref name.Reference, img v1.Image, options ...Option) error {
 	// the digest for whatever reason, we can't dedupe and might re-upload.
 	var g errgroup.Group
 	uploaded := map[v1.Hash]bool{}
+	totalLayers := len(ls) + 1
 	for _, l := range ls {
 		l := l
 
@@ -96,9 +97,10 @@ func Write(ref name.Reference, img v1.Image, options ...Option) error {
 			existed, err := w.uploadOne(l)
 			// if upload success notify layer digest to progress chan while chan is not nil
 			if err == nil && o != nil && o.updates != nil {
-				o.updates <- FinishLayer{
+				o.updates <- Update{
 					Digest:  h.String(),
 					Existed: existed,
+					Total:   totalLayers,
 				}
 			}
 			return err
@@ -124,9 +126,10 @@ func Write(ref name.Reference, img v1.Image, options ...Option) error {
 			// if upload success notify layer digest to progress chan while chan is not nil
 			if o != nil && o.updates != nil {
 				h, _ := l.Digest()
-				o.updates <- FinishLayer{
+				o.updates <- Update{
 					Digest:  h.String(),
 					Existed: existed,
+					Total:   totalLayers,
 				}
 			}
 		}
@@ -137,9 +140,10 @@ func Write(ref name.Reference, img v1.Image, options ...Option) error {
 			// if upload success notify layer digest to progress chan while chan is not nil
 			if err == nil && o != nil && o.updates != nil {
 				h, _ := l.Digest()
-				o.updates <- FinishLayer{
+				o.updates <- Update{
 					Digest:  h.String(),
 					Existed: existed,
+					Total:   totalLayers,
 				}
 			}
 			return err

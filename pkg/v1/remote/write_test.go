@@ -900,14 +900,14 @@ func TestWriteWithProgress(t *testing.T) {
 		t.Fatalf("NewTag() = %v", err)
 	}
 
-	updateNotice := make(chan FinishLayer)
+	updateNotice := make(chan Update)
 	stopCh := make(chan struct{})
 	go func() {
-		update := FinishLayer{}
+		update := Update{}
 		for {
 			select {
 			case update = <-updateNotice:
-				fmt.Printf("layer digest is: %s , existed is: %v\n", update.Digest, update.Existed)
+				fmt.Printf("total layer is %d layer digest is: %s , existed is: %v\n", update.Total, update.Digest, update.Existed)
 			case <-stopCh:
 				return
 			}

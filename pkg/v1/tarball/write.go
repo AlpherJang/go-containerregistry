@@ -283,6 +283,11 @@ func calculateManifest(refToImage map[name.Reference]v1.Image) (m Manifest, err 
 	return m, nil
 }
 
+func CalculateSize(refToImage map[name.Reference]v1.Image) (size int64, err error) {
+	size, _, _, err = getSizeAndManifest(refToImage)
+	return size, err
+}
+
 func getSizeAndManifest(refToImage map[name.Reference]v1.Image) (size int64, m Manifest, mBytes []byte, err error) {
 	m, err = calculateManifest(refToImage)
 	if err != nil {
